@@ -1,6 +1,7 @@
-const Anthropic = require('@anthropic-ai/sdk');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-const client = new Anthropic();
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
 const DIFFICULTY_MAP = {
   easy: 'Ask straightforward, common interview questions. Be encouraging.',
@@ -14,13 +15,18 @@ const INTERVIEW_TYPES = {
   mixed: 'Mix behavioral and technical questions naturally, as a real interview would flow.'
 };
 
+function parseJSON(text) {
+  try {
+    return JSON.parse(text.trim());
+  } catch {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) return JSON.parse(match[0]);
+    throw new Error('Failed to parse AI response');
+  }
+}
+
 async function generateQuestions(role, difficulty, interviewType, count = 5) {
-  const message = await client.messages.create({
-    model: 'claude-sonnet-4-5-20250929',
-    max_tokens: 2000,
-    messages: [{
-      role: 'user',
-      content: `You are an expert interviewer for ${role} positions.
+  const result = await model.generateContent(`You are an expert interviewer for ${role} positions.
 
 DIFFICULTY: ${difficulty} - ${DIFFICULTY_MAP[difficulty] || DIFFICULTY_MAP.medium}
 TYPE: ${interviewType} - ${INTERVIEW_TYPES[interviewType] || INTERVIEW_TYPES.mixed}
@@ -38,22 +44,13 @@ Generate exactly ${count} interview questions. Return ONLY valid JSON:
 }
 
 Make questions realistic, varied, and appropriate for a ${role} role at ${difficulty} difficulty.
-Return ONLY JSON, no markdown.`
-    }]
-  });
+Return ONLY JSON, no markdown.`);
 
-  const text = message.content[0].text.trim();
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  return JSON.parse(jsonMatch ? jsonMatch[0] : text);
+  return parseJSON(result.response.text());
 }
 
 async function evaluateAnswer(role, question, answer, difficulty) {
-  const message = await client.messages.create({
-    model: 'claude-sonnet-4-5-20250929',
-    max_tokens: 1500,
-    messages: [{
-      role: 'user',
-      content: `You are an expert interviewer evaluating a candidate for a ${role} position.
+  const result = await model.generateContent(`You are an expert interviewer evaluating a candidate for a ${role} position.
 
 QUESTION: ${question}
 CANDIDATE'S ANSWER: ${answer}
@@ -69,13 +66,9 @@ Evaluate the answer and return ONLY valid JSON:
 }
 
 Be fair but honest. Score relative to ${difficulty} difficulty expectations.
-Return ONLY JSON, no markdown.`
-    }]
-  });
+Return ONLY JSON, no markdown.`);
 
-  const text = message.content[0].text.trim();
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  return JSON.parse(jsonMatch ? jsonMatch[0] : text);
+  return parseJSON(result.response.text());
 }
 
 async function generateFinalReport(role, questionsAndAnswers) {
@@ -83,12 +76,7 @@ async function generateFinalReport(role, questionsAndAnswers) {
     `Q${i + 1}: ${qa.question}\nAnswer: ${qa.answer}\nScore: ${qa.score}/10`
   ).join('\n\n');
 
-  const message = await client.messages.create({
-    model: 'claude-sonnet-4-5-20250929',
-    max_tokens: 2000,
-    messages: [{
-      role: 'user',
-      content: `You are an expert interviewer writing a final assessment for a ${role} candidate.
+  const result = await model.generateContent(`You are an expert interviewer writing a final assessment for a ${role} candidate.
 
 INTERVIEW TRANSCRIPT:
 ${qaPairs}
@@ -104,13 +92,9 @@ Write a final assessment. Return ONLY valid JSON:
   "readinessLevel": "<Not Ready|Getting There|Almost Ready|Interview Ready>"
 }
 
-Return ONLY JSON, no markdown.`
-    }]
-  });
+Return ONLY JSON, no markdown.`);
 
-  const text = message.content[0].text.trim();
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  return JSON.parse(jsonMatch ? jsonMatch[0] : text);
+  return parseJSON(result.response.text());
 }
 
 module.exports = { generateQuestions, evaluateAnswer, generateFinalReport };
