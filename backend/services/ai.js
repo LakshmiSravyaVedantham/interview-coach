@@ -1,7 +1,5 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
+const MODEL = process.env.AI_MODEL || 'llama3.2:3b';
 
 const DIFFICULTY_MAP = {
   easy: 'Ask straightforward, common interview questions. Be encouraging.',
@@ -15,6 +13,17 @@ const INTERVIEW_TYPES = {
   mixed: 'Mix behavioral and technical questions naturally, as a real interview would flow.'
 };
 
+async function callAI(prompt) {
+  const res = await fetch(`${OLLAMA_URL}/api/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: MODEL, prompt, stream: false }),
+  });
+  if (!res.ok) throw new Error(`Ollama error: ${res.status}`);
+  const data = await res.json();
+  return data.response;
+}
+
 function parseJSON(text) {
   try {
     return JSON.parse(text.trim());
@@ -26,7 +35,7 @@ function parseJSON(text) {
 }
 
 async function generateQuestions(role, difficulty, interviewType, count = 5) {
-  const result = await model.generateContent(`You are an expert interviewer for ${role} positions.
+  const text = await callAI(`You are an expert interviewer for ${role} positions.
 
 DIFFICULTY: ${difficulty} - ${DIFFICULTY_MAP[difficulty] || DIFFICULTY_MAP.medium}
 TYPE: ${interviewType} - ${INTERVIEW_TYPES[interviewType] || INTERVIEW_TYPES.mixed}
@@ -44,13 +53,13 @@ Generate exactly ${count} interview questions. Return ONLY valid JSON:
 }
 
 Make questions realistic, varied, and appropriate for a ${role} role at ${difficulty} difficulty.
-Return ONLY JSON, no markdown.`);
+Return ONLY JSON, no markdown, no explanation.`);
 
-  return parseJSON(result.response.text());
+  return parseJSON(text);
 }
 
 async function evaluateAnswer(role, question, answer, difficulty) {
-  const result = await model.generateContent(`You are an expert interviewer evaluating a candidate for a ${role} position.
+  const text = await callAI(`You are an expert interviewer evaluating a candidate for a ${role} position.
 
 QUESTION: ${question}
 CANDIDATE'S ANSWER: ${answer}
@@ -66,9 +75,9 @@ Evaluate the answer and return ONLY valid JSON:
 }
 
 Be fair but honest. Score relative to ${difficulty} difficulty expectations.
-Return ONLY JSON, no markdown.`);
+Return ONLY JSON, no markdown, no explanation.`);
 
-  return parseJSON(result.response.text());
+  return parseJSON(text);
 }
 
 async function generateFinalReport(role, questionsAndAnswers) {
@@ -76,7 +85,7 @@ async function generateFinalReport(role, questionsAndAnswers) {
     `Q${i + 1}: ${qa.question}\nAnswer: ${qa.answer}\nScore: ${qa.score}/10`
   ).join('\n\n');
 
-  const result = await model.generateContent(`You are an expert interviewer writing a final assessment for a ${role} candidate.
+  const text = await callAI(`You are an expert interviewer writing a final assessment for a ${role} candidate.
 
 INTERVIEW TRANSCRIPT:
 ${qaPairs}
@@ -92,9 +101,9 @@ Write a final assessment. Return ONLY valid JSON:
   "readinessLevel": "<Not Ready|Getting There|Almost Ready|Interview Ready>"
 }
 
-Return ONLY JSON, no markdown.`);
+Return ONLY JSON, no markdown, no explanation.`);
 
-  return parseJSON(result.response.text());
+  return parseJSON(text);
 }
 
 module.exports = { generateQuestions, evaluateAnswer, generateFinalReport };
