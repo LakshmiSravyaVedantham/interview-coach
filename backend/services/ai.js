@@ -1,108 +1,79 @@
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
-const MODEL = process.env.AI_MODEL || 'llama3.2:3b';
+const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2:3b';
+
+async function callAI(prompt) {
+  if (GROQ_API_KEY) {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_API_KEY}` },
+      body: JSON.stringify({ model: GROQ_MODEL, messages: [{ role: 'user', content: prompt }], temperature: 0.7 }),
+    });
+    if (res.ok) { const data = await res.json(); return data.choices[0].message.content; }
+    console.warn('Groq failed, falling back to Ollama...');
+  }
+  const res = await fetch(`${OLLAMA_URL}/api/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: OLLAMA_MODEL, prompt, stream: false }),
+  });
+  if (!res.ok) throw new Error('Both Groq and Ollama failed. Set GROQ_API_KEY or start Ollama.');
+  return (await res.json()).response;
+}
+
+function parseJSON(text) {
+  try { return JSON.parse(text.trim()); }
+  catch { const m = text.match(/\{[\s\S]*\}/); if (m) return JSON.parse(m[0]); throw new Error('Failed to parse AI response'); }
+}
 
 const DIFFICULTY_MAP = {
   easy: 'Ask straightforward, common interview questions. Be encouraging.',
   medium: 'Ask standard industry interview questions with some follow-ups. Be professional.',
-  hard: 'Ask challenging, senior-level questions with tricky follow-ups. Probe deeply into answers. Be thorough.'
+  hard: 'Ask challenging, senior-level questions with tricky follow-ups. Probe deeply into answers.'
 };
-
 const INTERVIEW_TYPES = {
-  behavioral: 'Focus on behavioral questions (STAR method). Ask about past experiences, teamwork, conflict resolution, leadership.',
-  technical: 'Focus on technical knowledge, system design, problem-solving approaches, and domain expertise.',
-  mixed: 'Mix behavioral and technical questions naturally, as a real interview would flow.'
+  behavioral: 'Focus on behavioral questions (STAR method).',
+  technical: 'Focus on technical knowledge, system design, problem-solving.',
+  mixed: 'Mix behavioral and technical questions naturally.'
 };
-
-async function callAI(prompt) {
-  const res = await fetch(`${OLLAMA_URL}/api/generate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: MODEL, prompt, stream: false }),
-  });
-  if (!res.ok) throw new Error(`Ollama error: ${res.status}`);
-  const data = await res.json();
-  return data.response;
-}
-
-function parseJSON(text) {
-  try {
-    return JSON.parse(text.trim());
-  } catch {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]);
-    throw new Error('Failed to parse AI response');
-  }
-}
 
 async function generateQuestions(role, difficulty, interviewType, count = 5) {
   const text = await callAI(`You are an expert interviewer for ${role} positions.
-
 DIFFICULTY: ${difficulty} - ${DIFFICULTY_MAP[difficulty] || DIFFICULTY_MAP.medium}
 TYPE: ${interviewType} - ${INTERVIEW_TYPES[interviewType] || INTERVIEW_TYPES.mixed}
 
 Generate exactly ${count} interview questions. Return ONLY valid JSON:
-{
-  "questions": [
-    {
-      "id": 1,
-      "question": "<the interview question>",
-      "category": "<behavioral|technical|situational>",
-      "hint": "<a brief hint about what the interviewer is looking for>"
-    }
-  ]
-}
+{"questions":[{"id":1,"question":"<question>","category":"<behavioral|technical|situational>","hint":"<hint>"}]}
 
-Make questions realistic, varied, and appropriate for a ${role} role at ${difficulty} difficulty.
-Return ONLY JSON, no markdown, no explanation.`);
-
+Return ONLY JSON, no markdown.`);
   return parseJSON(text);
 }
 
 async function evaluateAnswer(role, question, answer, difficulty) {
   const text = await callAI(`You are an expert interviewer evaluating a candidate for a ${role} position.
-
 QUESTION: ${question}
 CANDIDATE'S ANSWER: ${answer}
-DIFFICULTY LEVEL: ${difficulty}
+DIFFICULTY: ${difficulty}
 
-Evaluate the answer and return ONLY valid JSON:
-{
-  "score": <1-10>,
-  "feedback": "<2-3 sentences of specific feedback>",
-  "strengths": ["<what they did well>"],
-  "improvements": ["<specific suggestion 1>", "<specific suggestion 2>"],
-  "sampleAnswer": "<A strong example answer for this question (2-3 sentences)>"
-}
+Return ONLY valid JSON:
+{"score":<1-10>,"feedback":"<2-3 sentences>","strengths":["<strength>"],"improvements":["<suggestion 1>","<suggestion 2>"],"sampleAnswer":"<strong example answer>"}
 
-Be fair but honest. Score relative to ${difficulty} difficulty expectations.
-Return ONLY JSON, no markdown, no explanation.`);
-
+Return ONLY JSON, no markdown.`);
   return parseJSON(text);
 }
 
 async function generateFinalReport(role, questionsAndAnswers) {
-  const qaPairs = questionsAndAnswers.map((qa, i) =>
-    `Q${i + 1}: ${qa.question}\nAnswer: ${qa.answer}\nScore: ${qa.score}/10`
-  ).join('\n\n');
-
+  const qaPairs = questionsAndAnswers.map((qa, i) => `Q${i+1}: ${qa.question}\nAnswer: ${qa.answer}\nScore: ${qa.score}/10`).join('\n\n');
   const text = await callAI(`You are an expert interviewer writing a final assessment for a ${role} candidate.
 
 INTERVIEW TRANSCRIPT:
 ${qaPairs}
 
-Write a final assessment. Return ONLY valid JSON:
-{
-  "overallScore": <1-100>,
-  "verdict": "<STRONG_HIRE|HIRE|MAYBE|NO_HIRE>",
-  "summary": "<3-4 sentence overall assessment>",
-  "topStrengths": ["<strength 1>", "<strength 2>", "<strength 3>"],
-  "areasToImprove": ["<area 1>", "<area 2>", "<area 3>"],
-  "recommendation": "<What the candidate should focus on to improve, 2-3 sentences>",
-  "readinessLevel": "<Not Ready|Getting There|Almost Ready|Interview Ready>"
-}
+Return ONLY valid JSON:
+{"overallScore":<1-100>,"verdict":"<STRONG_HIRE|HIRE|MAYBE|NO_HIRE>","summary":"<3-4 sentences>","topStrengths":["<s1>","<s2>","<s3>"],"areasToImprove":["<a1>","<a2>","<a3>"],"recommendation":"<2-3 sentences>","readinessLevel":"<Not Ready|Getting There|Almost Ready|Interview Ready>"}
 
-Return ONLY JSON, no markdown, no explanation.`);
-
+Return ONLY JSON, no markdown.`);
   return parseJSON(text);
 }
 
