@@ -8,7 +8,7 @@ async function callAI(prompt) {
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_API_KEY}` },
-      body: JSON.stringify({ model: GROQ_MODEL, messages: [{ role: 'user', content: prompt }], temperature: 0.7 }),
+      body: JSON.stringify({ model: GROQ_MODEL, messages: [{ role: 'user', content: prompt }], temperature: 0.7, max_tokens: 4096 }),
     });
     if (res.ok) { const data = await res.json(); return data.choices[0].message.content; }
     console.warn('Groq failed, falling back to Ollama...');
@@ -24,7 +24,14 @@ async function callAI(prompt) {
 
 function parseJSON(text) {
   try { return JSON.parse(text.trim()); }
-  catch { const m = text.match(/\{[\s\S]*\}/); if (m) return JSON.parse(m[0]); throw new Error('Failed to parse AI response'); }
+  catch {
+    const m = text.match(/\{[\s\S]*\}/);
+    if (m) {
+      try { return JSON.parse(m[0]); }
+      catch { /* fall through */ }
+    }
+    throw new Error('Failed to parse AI response');
+  }
 }
 
 const DIFFICULTY_MAP = {
@@ -51,29 +58,100 @@ Return ONLY JSON, no markdown.`);
 }
 
 async function evaluateAnswer(role, question, answer, difficulty) {
-  const text = await callAI(`You are an expert interviewer evaluating a candidate for a ${role} position.
+  const text = await callAI(`You are an elite interview coach who has served on Google's hiring committee and trained thousands of candidates. You evaluate with precision and depth.
+
+ROLE: ${role}
+DIFFICULTY: ${difficulty}
 QUESTION: ${question}
 CANDIDATE'S ANSWER: ${answer}
-DIFFICULTY: ${difficulty}
 
-Return ONLY valid JSON:
-{"score":<1-10>,"feedback":"<2-3 sentences>","strengths":["<strength>"],"improvements":["<suggestion 1>","<suggestion 2>"],"sampleAnswer":"<strong example answer>"}
+Perform a comprehensive evaluation across multiple dimensions:
 
-Return ONLY JSON, no markdown.`);
+1. STAR METHOD: Did the candidate use Situation-Task-Action-Result? Identify which elements are present/missing.
+2. CONTENT QUALITY: Evaluate specificity (concrete examples vs vague claims), relevance, and technical depth.
+3. COMMUNICATION: Detect filler words or vague language ("stuff", "things", "basically", "kind of", "sort of", "I think", "maybe"). Evaluate clarity.
+4. CONFIDENCE: Does the answer show ownership ("I led", "I decided") or deflection ("we just", "they told me to")?
+5. SCORING: Use a Google hiring committee rubric - score each dimension independently.
+6. FOLLOW-UP QUESTIONS: What would a skilled interviewer ask next?
+7. IDEAL ANSWER: Write the answer a top candidate would give.
+8. DELIVERY TIPS: Body language, pacing, presentation improvements.
+9. REWRITTEN ANSWER: Rewrite their answer to be significantly stronger while keeping their core content.
+
+Return ONLY valid JSON (no markdown, no code fences):
+{
+  "score": <1-10 overall>,
+  "feedback": "<2-3 sentence overall assessment>",
+  "strengths": ["<strength 1>", "<strength 2>"],
+  "improvements": ["<specific improvement 1>", "<specific improvement 2>"],
+  "starAnalysis": {
+    "situation": {"present": true, "feedback": "<what they said or what is missing>"},
+    "task": {"present": false, "feedback": "<what they said or what is missing>"},
+    "action": {"present": true, "feedback": "<what they said or what is missing>"},
+    "result": {"present": false, "feedback": "<what they said or what is missing>"}
+  },
+  "detailedScores": {
+    "relevance": <1-10>,
+    "specificity": <1-10>,
+    "structure": <1-10>,
+    "communication": <1-10>,
+    "confidence": <1-10>,
+    "technicalDepth": <1-10>
+  },
+  "fillerWords": ["<detected filler word or phrase>"],
+  "vagueStatements": ["<vague statement from their answer>"],
+  "followUpQuestions": ["<follow-up Q1>", "<follow-up Q2>", "<follow-up Q3>"],
+  "idealAnswer": "<the ideal answer a top candidate would give>",
+  "rewrittenAnswer": "<their answer rewritten to be much stronger>",
+  "deliveryTips": ["<tip 1>", "<tip 2>", "<tip 3>"],
+  "sampleAnswer": "<brief strong example answer>"
+}
+
+Use true/false booleans for present fields. Be thorough and actionable. Return ONLY JSON.`);
   return parseJSON(text);
 }
 
 async function generateFinalReport(role, questionsAndAnswers) {
-  const qaPairs = questionsAndAnswers.map((qa, i) => `Q${i+1}: ${qa.question}\nAnswer: ${qa.answer}\nScore: ${qa.score}/10`).join('\n\n');
-  const text = await callAI(`You are an expert interviewer writing a final assessment for a ${role} candidate.
+  const qaPairs = questionsAndAnswers.map((qa, i) =>
+    `Q${i+1}: ${qa.question}\nAnswer: ${qa.answer}\nScore: ${qa.score}/10`
+  ).join('\n\n');
+
+  const text = await callAI(`You are an elite interview coach writing a comprehensive final assessment for a ${role} candidate. You have evaluated candidates for top tech companies.
 
 INTERVIEW TRANSCRIPT:
 ${qaPairs}
 
-Return ONLY valid JSON:
-{"overallScore":<1-100>,"verdict":"<STRONG_HIRE|HIRE|MAYBE|NO_HIRE>","summary":"<3-4 sentences>","topStrengths":["<s1>","<s2>","<s3>"],"areasToImprove":["<a1>","<a2>","<a3>"],"recommendation":"<2-3 sentences>","readinessLevel":"<Not Ready|Getting There|Almost Ready|Interview Ready>"}
+Provide a thorough final report. Analyze patterns across all answers.
 
-Return ONLY JSON, no markdown.`);
+Return ONLY valid JSON (no markdown, no code fences):
+{
+  "overallScore": <1-100>,
+  "verdict": "<STRONG_HIRE|HIRE|MAYBE|NO_HIRE>",
+  "summary": "<4-5 sentence comprehensive summary>",
+  "topStrengths": ["<strength 1>", "<strength 2>", "<strength 3>"],
+  "areasToImprove": ["<area 1>", "<area 2>", "<area 3>"],
+  "recommendation": "<3-4 sentences of specific next steps>",
+  "readinessLevel": "<Not Ready|Getting There|Almost Ready|Interview Ready>",
+  "communicationProfile": {
+    "clarity": <1-10>,
+    "conciseness": <1-10>,
+    "confidence": <1-10>,
+    "storytelling": <1-10>,
+    "technicalArticulation": <1-10>
+  },
+  "interviewPatterns": {
+    "consistentStrengths": ["<pattern 1>", "<pattern 2>"],
+    "consistentWeaknesses": ["<pattern 1>", "<pattern 2>"],
+    "trajectory": "<improving|stable|declining>"
+  },
+  "actionPlan": [
+    {"priority": "high", "action": "<specific action item>", "timeframe": "<e.g., 1 week>"},
+    {"priority": "medium", "action": "<specific action item>", "timeframe": "<e.g., 2 weeks>"},
+    {"priority": "low", "action": "<specific action item>", "timeframe": "<e.g., 1 month>"}
+  ],
+  "mockInterviewTips": ["<tip 1>", "<tip 2>", "<tip 3>"]
+}
+
+Return ONLY JSON.`);
   return parseJSON(text);
 }
 

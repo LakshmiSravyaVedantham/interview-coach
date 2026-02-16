@@ -125,7 +125,9 @@ router.get('/report/:sessionId', async (req, res) => {
         question: a.question,
         answer: a.answer,
         score: a.score,
-        feedback: a.evaluation.feedback
+        feedback: a.evaluation.feedback,
+        detailedScores: a.evaluation.detailedScores,
+        starAnalysis: a.evaluation.starAnalysis
       })),
       meta: {
         role: session.role,
